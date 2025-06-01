@@ -46,14 +46,20 @@ BASE_CONFIG = {
         'margin': 0.2,
         'scale_factor': 30,
     },
-    
-    # Data augmentation
+      # Data augmentation
     'augment': {
         'enabled': True,
         'speed_perturb': True,
         'noise_prob': 0.5,
         'noise_snr_range': [5, 20],
         'reverb_prob': 0.5,
+        'musan_path': str(Path('./datasets/musan')),  # Path to MUSAN dataset
+        'musan_noise_prob': 0.3,  # Probability of using MUSAN noise vs Gaussian
+        'noise_types': {
+            'noise': 0.4,  # Background noise probability
+            'music': 0.3,  # Music probability
+            'speech': 0.3,  # Speech interference probability
+        },
     },
     
     # Inference

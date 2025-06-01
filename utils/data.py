@@ -10,6 +10,7 @@ import pandas as pd
 from typing import Dict, List, Optional
 from torch.utils.data import Dataset, DataLoader
 from models.feature_extractor import FeatureExtractor
+from utils.augment import AudioAugmentor
 
 class VietnamCelebDataset(Dataset):
     def __init__(
@@ -21,7 +22,10 @@ class VietnamCelebDataset(Dataset):
         sample_rate: int = 16000,
         feature_extractor: Optional[FeatureExtractor] = None,
         cache_dir: Optional[str] = None,
-        use_cache: bool = False
+        use_cache: bool = False,
+        augment: bool = False,
+        augment_config: Optional[dict] = None,
+        musan_path: Optional[str] = None
     ):
         super().__init__()
         
@@ -29,6 +33,7 @@ class VietnamCelebDataset(Dataset):
         self.max_frames = max_frames
         self.sample_rate = sample_rate
         self.use_cache = use_cache
+        self.augment = augment
         
         # Set up cache
         self.cache_dir = cache_dir if cache_dir else osp.join(data_root, "feature_cache")
@@ -38,6 +43,7 @@ class VietnamCelebDataset(Dataset):
         # Load metadata and utterances
         self.metadata = pd.read_csv(metadata_file, sep='\t')
         self.utterances = []
+        
         with open(utterance_file, 'r') as f:
             for line in f:
                 speaker_id, wav_file = line.strip().split('\t')
@@ -50,6 +56,17 @@ class VietnamCelebDataset(Dataset):
         
         # Initialize feature extractor
         self.feature_extractor = feature_extractor if feature_extractor else FeatureExtractor()
+          # Initialize augmentor if needed
+        self.augmentor = None
+        if augment:
+            aug_config = augment_config or {}
+            # Add MUSAN path from config or explicit parameter
+            if 'musan_path' in aug_config or musan_path:
+                aug_config['musan_path'] = musan_path or aug_config.get('musan_path')
+            self.augmentor = AudioAugmentor(
+                sample_rate=sample_rate,
+                **aug_config
+            )
     
     def _get_cache_path(self, speaker_id: str, wav_file: str) -> str:
         uid = f"{speaker_id}_{wav_file}"
@@ -64,7 +81,7 @@ class VietnamCelebDataset(Dataset):
         speaker_idx = self.speaker_to_idx[speaker_id]
         
         # Try cache first
-        if self.use_cache:
+        if self.use_cache and not self.augment:  # Don't use cache for augmented data
             cache_path = self._get_cache_path(speaker_id, wav_file)
             if osp.exists(cache_path):
                 try:
@@ -87,6 +104,10 @@ class VietnamCelebDataset(Dataset):
             
             if sr != self.sample_rate:
                 waveform = torchaudio.transforms.Resample(sr, self.sample_rate)(waveform)
+            
+            # Apply augmentation if enabled
+            if self.augment and self.augmentor is not None:
+                waveform = self.augmentor(waveform)
                 
             with torch.no_grad():
                 features = self.feature_extractor(waveform)
@@ -100,8 +121,8 @@ class VietnamCelebDataset(Dataset):
                 padding = torch.zeros(1, features.shape[1], self.max_frames - n_frames)
                 features = torch.cat([features, padding], dim=2)
             
-            # Cache features
-            if self.use_cache:
+            # Cache features only if augmentation is disabled
+            if self.use_cache and not self.augment:
                 try:
                     torch.save(features.squeeze(0), cache_path)
                 except Exception as e:
