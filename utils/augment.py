@@ -67,6 +67,7 @@ class MUSANNoiseDataset:
 class AudioAugmentor:
     def __init__(
         self,
+        enabled: bool = True,
         sample_rate: int = 16000,
         speed_perturb: bool = True,
         noise_prob: float = 0.5,
