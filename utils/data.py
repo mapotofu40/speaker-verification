@@ -289,11 +289,9 @@ def collate_fn(batch: List[Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
     keys = batch[0].keys()
     
     for key in keys:
-        # Handle string values separately from tensors
+        # Only include tensor fields in the output
         if isinstance(batch[0][key], torch.Tensor):
             output[key] = torch.stack([item[key] for item in batch])
-        else:
-            # For non-tensor values (like strings), just keep them in a list
-            output[key] = [item[key] for item in batch]
+        # Skip non-tensor fields as they're not needed for training
     
     return output
