@@ -75,40 +75,76 @@ class VietnamCelebDataset(Dataset):
         return osp.join(self.cache_dir, f"{hash_str}.pt")
     
     def _process_audio(self, wav_path: str) -> torch.Tensor:
-        """Process audio file into features"""
-        waveform, sr = torchaudio.load(wav_path)
+        """Process audio file into features.
         
-        # Convert to mono if stereo
-        if waveform.shape[0] > 1:
-            waveform = waveform[0].unsqueeze(0)
-        
-        # Resample if needed
-        if sr != self.sample_rate:
-            waveform = torchaudio.transforms.Resample(sr, self.sample_rate)(waveform)
-        
-        # Apply augmentation if enabled
-        if self.augment and self.augmentor is not None:
-            waveform = self.augmentor(waveform)
-        
-        # Extract features
-        with torch.no_grad():
-            features = self.feature_extractor(waveform)
-        
-        # Handle length
-        n_frames = features.shape[2]
-        if n_frames >= self.max_frames:
-            start = torch.randint(0, n_frames - self.max_frames + 1, (1,)).item()
-            features = features[:, :, start:start + self.max_frames]
-        else:
-            padding = torch.zeros(1, features.shape[1], self.max_frames - n_frames)
-            features = torch.cat([features, padding], dim=2)
-        
-        return features
+        Args:
+            wav_path: Path to the audio file
+            
+        Returns:
+            Tensor of shape (1, n_mels, frames) containing the processed features
+            
+        Raises:
+            RuntimeError: If unable to load or process the audio file
+        """
+        try:
+            # Load audio
+            waveform, sr = torchaudio.load(wav_path)
+            
+            # Convert to mono if stereo
+            if waveform.shape[0] > 1:
+                waveform = waveform.mean(dim=0, keepdim=True)
+            
+            # Resample if needed
+            if sr != self.sample_rate:
+                waveform = torchaudio.transforms.Resample(sr, self.sample_rate)(waveform)
+            
+            # Apply augmentation if enabled
+            if self.augment and self.augmentor is not None:
+                try:
+                    waveform = self.augmentor(waveform)
+                except Exception as e:
+                    print(f"Augmentation error for {wav_path}: {str(e)}")
+                    # Continue without augmentation
+            
+            # Extract features
+            with torch.no_grad():
+                features = self.feature_extractor(waveform)
+            
+            # Handle length
+            n_frames = features.shape[2]
+            if n_frames >= self.max_frames:
+                # Random crop to max_frames
+                start = torch.randint(0, n_frames - self.max_frames + 1, (1,)).item()
+                features = features[:, :, start:start + self.max_frames]
+            else:
+                # Pad with zeros
+                padding = torch.zeros(1, features.shape[1], self.max_frames - n_frames)
+                features = torch.cat([features, padding], dim=2)
+            
+            return features
+            
+        except Exception as e:
+            raise RuntimeError(f"Error processing audio file {wav_path}: {str(e)}") from e
     
     def __len__(self) -> int:
         return len(self.utterances)
     
-    def __getitem__(self, idx: int) -> Optional[Dict[str, torch.Tensor]]:
+    def __getitem__(self, idx: int) -> Dict[str, torch.Tensor]:
+        """Get an item from the dataset.
+        
+        Args:
+            idx: Index of the item to get
+            
+        Returns:
+            Dict containing:
+                - features: (n_mels, max_frames) tensor of mel spectrogram
+                - speaker_id: Integer tensor containing speaker index
+                - speaker_name: Original speaker ID string (for reference)
+                - file_name: Original audio file name (for reference)
+                
+        Raises:
+            RuntimeError: If unable to load or process the audio file
+        """
         speaker_id, wav_file = self.utterances[idx]
         speaker_idx = self.speaker_to_idx[speaker_id]
         
@@ -125,19 +161,23 @@ class VietnamCelebDataset(Dataset):
                         'file_name': wav_file
                     }
                 except Exception as e:
-                    print(f"Cache loading error for {cache_path}: {e}")
+                    print(f"Cache loading error for {cache_path}: {str(e)}")
+                    # Fall through to loading from WAV
         
         # Load and process audio
         wav_path = osp.join(self.data_root, 'data', speaker_id, wav_file)
+        if not osp.exists(wav_path):
+            raise RuntimeError(f"Audio file not found: {wav_path}")
+            
         try:
             features = self._process_audio(wav_path)
             
-            # Cache features only if augmentation is disabled
+            # Cache features if enabled and not using augmentation
             if self.use_cache and not self.augment:
                 try:
                     torch.save(features.squeeze(0), cache_path)
                 except Exception as e:
-                    print(f"Cache saving error for {cache_path}: {e}")
+                    print(f"Cache saving error for {cache_path}: {str(e)}")
             
             return {
                 'features': features.squeeze(0),
@@ -147,8 +187,7 @@ class VietnamCelebDataset(Dataset):
             }
             
         except Exception as e:
-            print(f"Error processing {wav_path}: {e}")
-            return None
+            raise RuntimeError(f"Error processing {wav_path}: {str(e)}") from e
 
 
 class ValidationPairDataset(Dataset):
