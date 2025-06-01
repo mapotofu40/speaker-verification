@@ -90,12 +90,13 @@ class AudioAugmentor:
         }
         
         # Initialize MUSAN dataset if path provided
-        self.musan = None
-        if musan_path:
-            self.musan = MUSANNoiseDataset(musan_path, sample_rate)
-        
-        # Initialize RIR (Room Impulse Response) convolution
-        self._load_default_rir()
+        if enabled:
+            self.musan = None
+            if musan_path:
+                self.musan = MUSANNoiseDataset(musan_path, sample_rate)
+            
+            # Initialize RIR (Room Impulse Response) convolution
+            self._load_default_rir()
     
     def _load_default_rir(self):
         """Load a default RIR or generate a simple one"""
