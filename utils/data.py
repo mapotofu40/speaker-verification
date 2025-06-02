@@ -44,6 +44,7 @@ class VietnamCelebDataset(Dataset):
         self.metadata = pd.read_csv(metadata_file, sep='\t')
         self.utterances = []
         
+        # Load utterance list
         with open(utterance_file, 'r') as f:
             for line in f:
                 speaker_id, wav_file = line.strip().split('\t')
@@ -68,7 +69,31 @@ class VietnamCelebDataset(Dataset):
                 sample_rate=sample_rate,
                 **aug_config
             )
-
+        
+        # Pre-load some features into cache if enabled
+        if use_cache and not augment:
+            self._preload_cache()
+    
+    def _preload_cache(self):
+        """Pre-load some features into cache during initialization"""
+        print("Pre-loading features into cache (this may take a few minutes)...")
+        num_samples = min(100, len(self.utterances))  # Adjust this number as needed
+        
+        for i in range(num_samples):
+            speaker_id, wav_file = self.utterances[i]
+            cache_path = self._get_cache_path(speaker_id, wav_file)
+            
+            if not osp.exists(cache_path):
+                try:
+                    wav_path = osp.join(self.data_root, 'data', speaker_id, wav_file)
+                    features = self._process_audio(wav_path)
+                    torch.save(features.squeeze(0), cache_path)
+                except Exception as e:
+                    print(f"Error pre-loading {wav_path}: {str(e)}")
+                    continue
+        
+        print("Pre-loading complete")
+    
     def _get_cache_path(self, speaker_id: str, wav_file: str) -> str:
         uid = f"{speaker_id}_{wav_file}"
         hash_str = hashlib.md5(uid.encode()).hexdigest()
